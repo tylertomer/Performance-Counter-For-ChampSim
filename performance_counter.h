@@ -14,7 +14,6 @@
 #include <fmt/ranges.h>
 
 #include <iostream>
-
 #include <cstdint>
 #include <unordered_map>
 
@@ -25,11 +24,15 @@ class performance_counter : public EventListener {
     std::unordered_map<std::string, uint64_t> cache_loads;
     std::unordered_map<std::string, uint64_t> cache_store_misses;
     std::unordered_map<std::string, uint64_t> cache_load_misses;
+    std::unordered_map<std::string, uint64_t> num_branches_type;
+    std::unordered_map<std::string, uint64_t> num_misses_branch_type;
+    std::unordered_map<std::string, uint64_t> retired_instr_type_count;
     bool in_warmup = true;
 
-    long cycles =0;
+    long cycles = 0;
     long print_cycles = 10000;
     long num_cycles = 0;
+    long num_branches = 0;
     
     public:
      void process_event(event eventType, void* data) {
@@ -41,180 +44,105 @@ class performance_counter : public EventListener {
         if (in_warmup) {
             return;
         }
-        num_cycles++;
-        cycles++;
-        if(eventType ==  event::PRE_CYCLE){
-            if(cycles >= print_cycles){
+        if (eventType == event::PRE_CYCLE) {
+            cycles++;
+            num_cycles++;
+            if (cycles >= print_cycles) {
                 cycles = 0;
-                fmt::print("lifetime Cycles: {}\n", num_cycles);
-                fmt::print("Overall Cache Stats: \n");
-                fmt::print("LLC_accesses:{} LLC_misses: {}\n", cache_access["LLC"], cache_misses["LLC"]);
-                fmt::print("L1I_accesses:{} L1I_misses: {}\n", cache_access["L1I"], cache_misses["L1I"]);
-                fmt::print("L1D_accesses:{} L1D_misses: {}\n", cache_access["L1D"], cache_misses["L1D"]);
-                fmt::print("L2C_accesses:{} L2C_misses: {}\n", cache_access["L2C"], cache_misses["L2C"]);
-                fmt::print("STLB_accesses:{} STLB_misses: {}\n", cache_access["STLB"], cache_misses["STLB"]);
-                fmt::print("iTLB_accesses:{} iTLB_misses: {}\n", cache_access["iTLB"], cache_misses["iTLB"]);
-                fmt::print("dTLB_accesses:{} STLB_misses: {}\n", cache_access["dTLB"], cache_misses["dTLB"]);
-                fmt::print("Cache Store Stats: \n");
-                fmt::print("LLC_stores:{} LLC_store_misses: {}\n", cache_stores["LLC"], cache_store_misses["LLC"]);
-                fmt::print("L1I_stores:{} L1I_store_misses: {}\n", cache_stores["L1I"], cache_store_misses["L1I"]);
-                fmt::print("L1D_stores:{} L1D_store_misses: {}\n", cache_stores["L1D"], cache_store_misses["L1D"]);
-                fmt::print("L2C_stores:{} L2C_store_misses: {}\n", cache_stores["L2C"], cache_store_misses["L2C"]);
-                fmt::print("STLB_stores:{} STLB_store_misses: {}\n", cache_stores["STLB"], cache_store_misses["STLB"]);
-                fmt::print("iTLB_stores:{} iTLB_store_misses: {}\n", cache_stores["iTLB"], cache_store_misses["iTLB"]);
-                fmt::print("dTLB_stores:{} STLB_store_misses: {}\n", cache_stores["dTLB"], cache_store_misses["dTLB"]);
-                fmt::print("Cache Load Stats: \n");
-                fmt::print("LLC_loads:{} LLC_load_misses: {}\n", cache_loads["LLC"], cache_load_misses["LLC"]);
-                fmt::print("L1I_loads:{} L1I_load_misses: {}\n", cache_loads["L1I"], cache_load_misses["L1I"]);
-                fmt::print("L1D_loads:{} L1D_load_misses: {}\n", cache_loads["L1D"], cache_load_misses["L1D"]);
-                fmt::print("L2C_loads:{} L2C_load_misses: {}\n", cache_loads["L2C"], cache_load_misses["L2C"]);
-                fmt::print("STLB_loads:{} STLB_load_misses: {}\n", cache_loads["STLB"], cache_load_misses["STLB"]);
-                fmt::print("iTLB_loads:{} iTLB_load_misses: {}\n", cache_loads["iTLB"], cache_load_misses["iTLB"]);
-                fmt::print("dTLB_loads:{} STLB_load_misses: {}\n", cache_loads["dTLB"], cache_load_misses["dTLB"]);
+                fmt::print("Performance Check\n");
+                fmt::print("Lifetime Cycles: {}\n", num_cycles);
+                fmt::print("Overall Cache Stats:\n");
+                for (const auto& [cache, count] : cache_access) {
+                    auto miss_it = cache_misses.find(cache);
+                    if (miss_it != cache_misses.end()) {
+                        fmt::print("{} accesses: {} {} misses: {}\n", cache, count, cache, miss_it->second);
+                    } else {
+                        fmt::print("{} accesses: {} (No miss data available)\n", cache, count);
+                    }
+                }
+                fmt::print("Branch Stats:\n");
+                for(const auto& [branch, count] : num_branches_type){
+                    auto miss_it = num_misses_branch_type.find(branch);
+                    if(miss_it != num_misses_branch_type.end()){
+                        fmt::print("{} instructions: {} {} misses: {}\n", branch, count, branch, miss_it->second);
+                    } else {
+                        fmt::print("{}: {} (No miss data available)\n", branch, count);
+                    }
+                }
+                fmt::print("Retire Instructions:\n");
+                for(const auto& [instruction, count] : retired_instr_type_count){
+                    fmt::print("{}: {}\n", instruction, count);
+                }
             }
         }
 
-        if (eventType == event::CACHE_TRY_HIT){
+        if (eventType == event::CACHE_TRY_HIT) {
             CACHE_TRY_HIT_data* c_data = static_cast<CACHE_TRY_HIT_data*>(data);
-            if(c_data->NAME == "LLC"){
-                cache_access["LLC"]++;
-                if (!c_data->hit){
-                    cache_misses["LLC"]++;
-                }
-                if(c_data->type == "WRITE"){
-                    cache_stores["LLC"]++;
-                }
-                else if(c_data-> == "LOAD"){
-                    cache_loads["LLC"]++;
-                }
+            cache_access[c_data->NAME]++;
+            if (!c_data->hit) {
+                cache_misses[c_data->NAME]++;
             }
-            else if(c_data->NAME == "L1I"){
-                cache_access["L1I"]++;
-                if(!c_data->hit){
-                    cache_misses["L1I"]++;
+            if (c_data->type == access_type::WRITE) {
+                cache_stores[c_data->NAME]++;
+                if (!c_data->hit) {
+                    cache_store_misses[c_data->NAME]++;
                 }
-                if(c_data->type == "WRITE"){
-                    cache_stores["L1I"]++;
-                }
-                else if(c_data-> == "LOAD"){
-                    cache_loads["L1I"]++;
-                }
-            }
-            else if(c_data->NAME == "L1D"){
-                cache_access["L1D"]++;
-                if(!c_data->hit){
-                    cache_misses["L1D"]++;
-                }
-                if(c_data->type == "WRITE"){
-                    cache_stores["L1D"]++;
-                }
-                else if(c_data-> == "LOAD"){
-                    cache_loads["L1D"]++;
-                }
-            }
-            else if(c_data->NAME == "L2C"){
-                cache_access["L2C"]++;
-                if(!c_data->hit){
-                    cache_misses["L2C"]++;
-                }
-                if(c_data->type == "WRITE"){
-                    cache_stores["L2C"]++;
-                }
-                else if(c_data-> == "LOAD"){
-                    cache_loads["L2C"]++;
-                }
-            }
-            else if(c_data->NAME == "STLB"){
-                cache_access["STLB"]++;
-                if(!c_data->hit){
-                    cache_misses["STLB"]++;
-                }
-                if(c_data->type == "WRITE"){
-                    cache_stores["L2C"]++;
-                }
-                else if(c_data-> == "LOAD"){
-                    cache_loads["L2C"]++;
-                }
-            }
-            else if(c_data->NAME == "iTLB"){
-                cache_access["iTLB"]++;
-                if(!c_data->hit){
-                    cache_misses["iTLB"]++;
-                }
-                if(c_data->type == "WRITE"){
-                    cache_stores["iTLB"]++;
-                }
-                else if(c_data-> == "LOAD"){
-                    cache_loads["iTLB"]++;
-                }
-            }
-            else if(c_data->NAME == "dTLB"){
-                cache_access["dTLB"]++;
-                if(!c_data->hit){
-                    cache_misses["dTLB"]++;
-                }
-                if(c_data->type == "WRITE"){
-                    cache_stores["dTLB"]++;
-                }
-                else if(c_data-> == "LOAD"){
-                    cache_loads["dTLB"]++;
-                }
-            }
-
-        }
-
-        if(eventType == CACHE_HANDLE_MISSES_data){
-            if(c_data->type == "WRITE"){
-                if(c_data->NAME == "LLC"){
-                    cache_store_misses["LLC"]++;
-                }
-                else if(c_data->NAME == "L1I"){
-                    cache_store_misses["L1I"]++;
-                }
-                else if(c_data->NAME == "L1D"){
-                    cache_store_misses["L1D"]++;
-                }
-                else if(c_data->NAME == "L2C"){
-                    cache_store_misses["L2C"]++;
-                }
-                else if(c_data->NAME == "STLB"){
-                    cache_store_misses["STLB"]++;
-                }
-                else if(c_data->NAME == "iTLB"){
-                    cache_store_misses["iTLB"]++;
-                }
-                else if(c_data->NAME == "dTLB"){
-                    cache_store_misses["dTLB"]++;
-                }
-            }
-            else if(c_data-> == "LOAD"){
-                if(c_data->NAME == "LLC"){
-                    cache_load_misses["LLC"]++;
-                }
-                else if(c_data->NAME == "L1I"){
-                    cache_load_misses["L1I"]++;
-                }
-                else if(c_data->NAME == "L1D"){
-                    cache_load_misses["L1D"]++;
-                }
-                else if(c_data->NAME == "L2C"){
-                    cache_load_misses["L2C"]++;
-                }
-                else if(c_data->NAME == "STLB"){
-                    cache_load_misses["STLB"]++;
-                }
-                else if(c_data->NAME == "iTLB"){
-                    cache_load_misses["iTLB"]++;
-                }
-                else if(c_data->NAME == "dTLB"){
-                    cache_load_misses["dTLB"]++;
+            } else if (c_data->type == access_type::LOAD) {
+                cache_loads[c_data->NAME]++;
+                if (!c_data->hit) {
+                    cache_load_misses[c_data->NAME]++;
                 }
             }
         }
 
+        if (eventType == event::BRANCH) {
+            num_branches++;
+            BRANCH_data* b_data = static_cast<BRANCH_data*>(data);
+            num_branches_type[branch_type_to_string(b_data->instr->branch)]++;
+            if (b_data->instr->branch_mispredicted) {
+                num_misses_branch_type[branch_type_to_string(b_data->instr->branch)]++;
+            }
+        }
+
+        if (eventType == event::RETIRE) {
+            RETIRE_data* r_data = static_cast<RETIRE_data*>(data);
+            for (auto it = r_data->begin; it != r_data->end; ++it) {
+                const auto& instr = *it;
+                if (instr.is_branch) {
+                    retired_instr_type_count["Branches"]++;
+                } else if (!instr.source_memory.empty() && instr.destination_registers.empty()) {
+                    retired_instr_type_count["ALU"]++;
+                } else if (!instr.destination_memory.empty() && instr.source_registers.empty()) {
+                    retired_instr_type_count["Stores"]++;
+                } else if (!instr.source_memory.empty() && instr.destination_registers.empty()) {
+                    retired_instr_type_count["Loads"]++;
+                } else {
+                    retired_instr_type_count["Other"]++;
+                }
+            }
+        }
     }
 
-    
+    std::string branch_type_to_string(branch_type type) {
+        switch(type){
+            case BRANCH_DIRECT_JUMP: 
+                return "BRANCH_DIRECT_JUMP";
+            case BRANCH_INDIRECT:
+                return "BRANCH_INDIRECT";
+            case BRANCH_CONDITIONAL:
+                return "BRANCH_CONDITIONAL";
+            case BRANCH_DIRECT_CALL:
+                return "BRANCH_DIRECT_CALL";
+            case BRANCH_INDIRECT_CALL:
+                return "BRANCH_INDIRECT_CALL";
+            case BRANCH_RETURN:
+                return "BRANCH_RETURN";
+            case BRANCH_OTHER:
+                return "BRANCH_OTHER";
+            default:
+                return "error";
+        }
+    }
 };
 
 #endif
@@ -223,3 +151,4 @@ class performance_counter : public EventListener {
 #undef SET_ASIDE_CHAMPSIM_MODULE
 #define CHAMPSIM_MODULE
 #endif
+
